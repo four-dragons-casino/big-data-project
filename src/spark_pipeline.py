@@ -5,7 +5,6 @@ PySpark implementation of the preprocessing pipeline.
 This file is intended to be run on a Spark cluster or Databricks workspace.
 """
 
-from pathlib import Path
 from typing import List
 
 from pyspark.sql import SparkSession
@@ -38,18 +37,25 @@ def add_feature_flags(df, top_features: List[str]):
 
 
 def run_spark_pipeline(
-    input_path: str = config.BRONZE_PATH,
-    output_path: str = config.SILVER_PATH,
+    input_path: str = config.BRONZE_DELTA_PATH,
+    output_path: str = config.SILVER_DELTA_PATH,
+    output_table: str = config.SILVER_TABLE,
     top_features: int = config.TOP_FEATURES,
     price_clip_quantile: float = config.PRICE_CLIP_QUANTILE,
 ) -> None:
     spark = build_spark()
 
-    df = (
-        spark.read.option("header", True)
-        .option("inferSchema", True)
-        .csv(str(input_path))
-    )
+    reader = spark.read
+    lower = str(input_path).lower()
+    if lower.endswith(".csv"):
+        df = reader.option("header", True).option("inferSchema", True).csv(str(input_path))
+    elif lower.endswith(".parquet"):
+        df = reader.parquet(str(input_path))
+    elif "." in input_path and not lower.startswith("dbfs:"):
+        df = spark.table(input_path)
+    else:
+        df = reader.format("delta").load(str(input_path))
+
     df = rename_columns(df)
     df = df.drop("Index") if "Index" in df.columns else df
 
@@ -120,15 +126,19 @@ def run_spark_pipeline(
         how="left",
     )
 
-    df.write.mode("overwrite").parquet(str(output_path))
+    writer = df.write.mode("overwrite").format("delta")
+    if output_path:
+        writer = writer.option("path", str(output_path))
+    writer.saveAsTable(output_table)
 
 
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Spark pipeline for Bronze -> Silver on Databricks.")
-    parser.add_argument("--input-path", type=str, default=config.BRONZE_PATH, help="Bronze input path (csv/parquet).")
-    parser.add_argument("--output-path", type=str, default=config.SILVER_PATH, help="Silver output path (parquet).")
+    parser = argparse.ArgumentParser(description="Spark pipeline for Bronze -> Silver Delta on Databricks.")
+    parser.add_argument("--input-path", type=str, default=config.BRONZE_DELTA_PATH, help="Bronze input path or table.")
+    parser.add_argument("--output-path", type=str, default=config.SILVER_DELTA_PATH, help="Silver Delta output path.")
+    parser.add_argument("--output-table", type=str, default=config.SILVER_TABLE, help="Silver Delta table name.")
     parser.add_argument("--top-features", type=int, default=config.TOP_FEATURES, help="Top equipment flags.")
     parser.add_argument(
         "--price-clip-quantile", type=float, default=config.PRICE_CLIP_QUANTILE, help="Price quantile for capping."
@@ -137,6 +147,7 @@ def main() -> None:
     run_spark_pipeline(
         input_path=args.input_path,
         output_path=args.output_path,
+        output_table=args.output_table,
         top_features=args.top_features,
         price_clip_quantile=args.price_clip_quantile,
     )

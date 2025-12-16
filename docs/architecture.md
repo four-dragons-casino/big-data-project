@@ -4,23 +4,22 @@
 - **Objective:** Build a scalable pipeline to ingest car sale ads, clean/enrich the data, explore insights, and deliver a price prediction model (Option A).
 - **Stack:** Pandas + PyArrow for local processing, optional PySpark job for cluster-scale runs, scikit-learn for modeling, matplotlib/seaborn for EDA.
 
-## Medallion Data Flow
+## Medallion Data Flow (Delta on Databricks)
 ```
-Bronze (raw)  : data/Car_sale_ads.csv -> optional lake/raw/car_ads/<ingestion_date>.parquet
-                   - schema inference, row count/null checks
-                   - stored as-is for audit/replay
+Bronze (raw)  : ${DELTA_ROOT}/bronze/car_sale_ads_raw (table: car_price.bronze_car_sale_ads)
+                   - ingested from data/Car_sale_ads.csv
+                   - schema + null checks, replayable raw copy
 
-Silver (clean): src.pipeline or src.spark_pipeline
+Silver (clean): ${DELTA_ROOT}/silver/car_ads_processed (table: car_price.silver_car_ads_processed)
+                   - src.pipeline (pandas -> Delta via Spark) or src/spark_pipeline.py (PySpark)
                    - currency to PLN, date parsing, outlier caps
                    - missing handling, top-k feature flags, high-card caps
-                   - output artifacts/processed/car_ads_processed.parquet
 
-Gold (serving): model-ready features and predictions
-                   - scikit-learn pipeline + hist gradient boosting model
-                   - artifacts/models/price_model.joblib
-                   - scored outputs for API/batch (predictions/offer_year=YYYY/...)
+Gold (serving): ${DELTA_ROOT}/gold/
+                   - models/price_model.joblib in DBFS
+                   - predictions table: car_price.gold_predictions (path ${DELTA_ROOT}/gold/predictions)
 
-EDA/notebooks operate on Silver; dashboards/API consume Gold.
+Local convenience: artifacts/processed + artifacts/models remain for notebooks/CLI.
 ```
 
 ## Key Transformations
@@ -39,7 +38,7 @@ EDA/notebooks operate on Silver; dashboards/API consume Gold.
 
 ## Orchestration
 - Local: run Python modules directly; directory creation handled in-code. Use `analysis/eda.ipynb` for interactive visuals.
-- Batch/cluster: `src/spark_pipeline.py` ready for `spark-submit` on Databricks/EMR; write Bronze->Silver parquet to data lake, then trigger notebook/model job for Gold.
+- Batch/cluster: `src/spark_pipeline.py` ready for `spark-submit` on Databricks/EMR; write Bronze->Silver Delta tables, then trigger notebook/model job for Gold.
 - Hooks for scheduling: wrap commands in Airflow/Databricks Workflows with SLA alarms on row counts and null-rate checks (see `processing_summary.json`).
 
 ## Scalability & Reliability

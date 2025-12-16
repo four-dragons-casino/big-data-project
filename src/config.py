@@ -1,16 +1,15 @@
 import os
 from pathlib import Path
 
-# Datalake targets (Databricks DBFS by default; override with env vars for local runs)
-DATABRICKS_DATALAKE_BASE = os.getenv("DATABRICKS_DATALAKE_BASE", "dbfs:/mnt/datalake/car_price_project")
-BRONZE_PATH = os.getenv("BRONZE_PATH", f"{DATABRICKS_DATALAKE_BASE}/bronze/car_sale_ads_raw")
-SILVER_PATH = os.getenv("SILVER_PATH", f"{DATABRICKS_DATALAKE_BASE}/silver/car_ads_processed")
-GOLD_MODEL_PATH = os.getenv("GOLD_MODEL_PATH", f"{DATABRICKS_DATALAKE_BASE}/gold/models/price_model.joblib")
-GOLD_PREDICTIONS_PATH = os.getenv("GOLD_PREDICTIONS_PATH", f"{DATABRICKS_DATALAKE_BASE}/gold/predictions")
+# Simple Delta table destinations (saveAsTable only)
+BRONZE_TABLE = os.getenv("BRONZE_TABLE", "car_price.bronze_car_sale_ads")
+SILVER_TABLE = os.getenv("SILVER_TABLE", "car_price.silver_car_ads_processed")
+GOLD_TABLE = os.getenv("GOLD_TABLE", "car_price.gold_car_ads_model_ready")
+GOLD_PREDICTIONS_TABLE = os.getenv("GOLD_PREDICTIONS_TABLE", "car_price.gold_predictions")
+GOLD_MODEL_PATH = os.getenv("GOLD_MODEL_PATH", "dbfs:/tmp/car_price/models/price_model.joblib")
 
-# Local convenience paths (kept for notebook/CLI usage)
+# Local convenience paths (optional)
 DATA_PATH = Path("data/Car_sale_ads.csv")
-PROCESSED_DATA_PATH = Path("artifacts/processed/car_ads_processed.parquet")
 PROCESSING_SUMMARY_PATH = Path("reports/metrics/processing_summary.json")
 FIGURES_DIR = Path("reports/figures")
 METRICS_PATH = Path("reports/metrics/model_metrics.json")

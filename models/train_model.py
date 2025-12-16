@@ -20,8 +20,36 @@ from src import config
 from src.utils import ensure_directory, save_json
 
 
-def load_dataset(path: Path) -> pd.DataFrame:
-    return pd.read_parquet(path)
+def _get_spark_session():
+    try:
+        from pyspark.sql import SparkSession
+    except Exception as e:
+        raise RuntimeError("PySpark is required to read/write Delta paths on Databricks.") from e
+    return SparkSession.builder.appName("CarPriceModel").getOrCreate()
+
+
+def load_dataset(path: Path | str) -> pd.DataFrame:
+    if isinstance(path, Path) and path.exists():
+        return pd.read_parquet(path)
+    path_str = str(path)
+    if path_str.startswith(("dbfs:", "s3:", "abfss:")):
+        spark = _get_spark_session()
+        return spark.read.format("delta").load(path_str).toPandas()
+    if "." in path_str and not path_str.startswith("/"):
+        spark = _get_spark_session()
+        return spark.table(path_str).toPandas()
+    return pd.read_parquet(path_str)
+
+
+def write_delta_from_pandas(df: pd.DataFrame, path: str | None, table: str | None) -> None:
+    spark = _get_spark_session()
+    writer = spark.createDataFrame(df).write.mode("overwrite").format("delta")
+    if path:
+        writer = writer.option("path", path)
+    if table:
+        writer.saveAsTable(table)
+    else:
+        writer.save(path)
 
 
 def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series, List[str], List[str]]:
@@ -111,13 +139,15 @@ def compute_feature_importance(model: Pipeline, X: pd.DataFrame, y_log: pd.Serie
 
 
 def train(
-    input_path: Path,
+    input_path: Path | str,
     model_path: Path,
     metrics_path: Path,
     sample_size: int = 80000,
     n_iter: int = 6,
     skip_tuning: bool = False,
     gold_model_path: str | None = config.GOLD_MODEL_PATH,
+    gold_predictions_path: str | None = None,
+    gold_predictions_table: str | None = config.GOLD_PREDICTIONS_TABLE,
     write_gold: bool = True,
 ) -> Dict[str, Any]:
     df = load_dataset(input_path)
@@ -156,8 +186,15 @@ def train(
     joblib.dump(tuned_model, model_path)
 
     if write_gold and gold_model_path:
-        # Gold: persisted model in datalake (Databricks DBFS expected)
         joblib.dump(tuned_model, gold_model_path)
+
+    if write_gold and (gold_predictions_path or gold_predictions_table):
+        y_true = np.expm1(y_test)
+        y_pred = np.expm1(tuned_model.predict(X_test))
+        pred_df = X_test[["brand", "model_capped", "fuel_type", "vehicle_type"]].copy()
+        pred_df["price_true"] = y_true
+        pred_df["price_pred"] = y_pred
+        write_delta_from_pandas(pred_df.reset_index(drop=True), gold_predictions_path, gold_predictions_table)
 
     payload = {
         "rows_used": int(len(df)),
@@ -167,6 +204,8 @@ def train(
         "sample_size_for_tuning": int(tuning_rows),
         "skip_tuning": skip_tuning,
         "gold_model_path": gold_model_path if write_gold else None,
+        "gold_predictions_path": gold_predictions_path if write_gold else None,
+        "gold_predictions_table": gold_predictions_table if write_gold else None,
     }
     save_json(metrics_path, payload)
     return payload
@@ -174,7 +213,9 @@ def train(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train predictive model for car price estimation.")
-    parser.add_argument("--input-path", type=Path, default=config.PROCESSED_DATA_PATH, help="Processed parquet input.")
+    parser.add_argument(
+        "--input-path", type=str, default=str(config.GOLD_TABLE), help="Processed Delta/Parquet input."
+    )
     parser.add_argument("--model-path", type=Path, default=config.MODEL_PATH, help="Where to store the trained model.")
     parser.add_argument(
         "--metrics-path", type=Path, default=config.METRICS_PATH, help="Where to store evaluation metrics JSON."
@@ -186,11 +227,21 @@ def parse_args() -> argparse.Namespace:
         "--gold-model-path",
         type=str,
         default=config.GOLD_MODEL_PATH,
-        help="Databricks Datalake (gold) destination for the trained model.",
+        help="Delta/DBFS destination for the trained model artifact.",
     )
     parser.add_argument(
-        "--no-write-gold", action="store_true", help="Skip writing the trained model to the gold datalake path."
+        "--gold-predictions-path",
+        type=str,
+        default=None,
+        help="Delta path for scored predictions (Gold layer).",
     )
+    parser.add_argument(
+        "--gold-predictions-table",
+        type=str,
+        default=config.GOLD_PREDICTIONS_TABLE,
+        help="Delta table name for scored predictions (Gold layer).",
+    )
+    parser.add_argument("--no-write-gold", action="store_true", help="Skip writing Gold outputs.")
     return parser.parse_args()
 
 
@@ -204,6 +255,8 @@ def main() -> None:
         n_iter=args.n_iter,
         skip_tuning=args.skip_tuning,
         gold_model_path=args.gold_model_path,
+        gold_predictions_path=args.gold_predictions_path,
+        gold_predictions_table=args.gold_predictions_table,
         write_gold=not args.no_write_gold,
     )
 
