@@ -1,6 +1,14 @@
+import os
 from pathlib import Path
 
-# Paths
+# Datalake targets (Databricks DBFS by default; override with env vars for local runs)
+DATABRICKS_DATALAKE_BASE = os.getenv("DATABRICKS_DATALAKE_BASE", "dbfs:/mnt/datalake/car_price_project")
+BRONZE_PATH = os.getenv("BRONZE_PATH", f"{DATABRICKS_DATALAKE_BASE}/bronze/car_sale_ads_raw")
+SILVER_PATH = os.getenv("SILVER_PATH", f"{DATABRICKS_DATALAKE_BASE}/silver/car_ads_processed")
+GOLD_MODEL_PATH = os.getenv("GOLD_MODEL_PATH", f"{DATABRICKS_DATALAKE_BASE}/gold/models/price_model.joblib")
+GOLD_PREDICTIONS_PATH = os.getenv("GOLD_PREDICTIONS_PATH", f"{DATABRICKS_DATALAKE_BASE}/gold/predictions")
+
+# Local convenience paths (kept for notebook/CLI usage)
 DATA_PATH = Path("data/Car_sale_ads.csv")
 PROCESSED_DATA_PATH = Path("artifacts/processed/car_ads_processed.parquet")
 PROCESSING_SUMMARY_PATH = Path("reports/metrics/processing_summary.json")

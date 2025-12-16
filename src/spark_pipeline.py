@@ -38,8 +38,8 @@ def add_feature_flags(df, top_features: List[str]):
 
 
 def run_spark_pipeline(
-    input_path: Path = config.DATA_PATH,
-    output_path: Path = config.PROCESSED_DATA_PATH,
+    input_path: str = config.BRONZE_PATH,
+    output_path: str = config.SILVER_PATH,
     top_features: int = config.TOP_FEATURES,
     price_clip_quantile: float = config.PRICE_CLIP_QUANTILE,
 ) -> None:
@@ -120,10 +120,27 @@ def run_spark_pipeline(
         how="left",
     )
 
-    ensure_path = Path(output_path)
-    ensure_path.parent.mkdir(parents=True, exist_ok=True)
     df.write.mode("overwrite").parquet(str(output_path))
 
 
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Spark pipeline for Bronze -> Silver on Databricks.")
+    parser.add_argument("--input-path", type=str, default=config.BRONZE_PATH, help="Bronze input path (csv/parquet).")
+    parser.add_argument("--output-path", type=str, default=config.SILVER_PATH, help="Silver output path (parquet).")
+    parser.add_argument("--top-features", type=int, default=config.TOP_FEATURES, help="Top equipment flags.")
+    parser.add_argument(
+        "--price-clip-quantile", type=float, default=config.PRICE_CLIP_QUANTILE, help="Price quantile for capping."
+    )
+    args = parser.parse_args()
+    run_spark_pipeline(
+        input_path=args.input_path,
+        output_path=args.output_path,
+        top_features=args.top_features,
+        price_clip_quantile=args.price_clip_quantile,
+    )
+
+
 if __name__ == "__main__":
-    run_spark_pipeline()
+    main()

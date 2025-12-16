@@ -117,6 +117,8 @@ def train(
     sample_size: int = 80000,
     n_iter: int = 6,
     skip_tuning: bool = False,
+    gold_model_path: str | None = config.GOLD_MODEL_PATH,
+    write_gold: bool = True,
 ) -> Dict[str, Any]:
     df = load_dataset(input_path)
     X, y, numeric_features, categorical_features = prepare_features(df)
@@ -153,6 +155,10 @@ def train(
     ensure_directory(model_path.parent)
     joblib.dump(tuned_model, model_path)
 
+    if write_gold and gold_model_path:
+        # Gold: persisted model in datalake (Databricks DBFS expected)
+        joblib.dump(tuned_model, gold_model_path)
+
     payload = {
         "rows_used": int(len(df)),
         "best_params": best_params,
@@ -160,6 +166,7 @@ def train(
         "feature_importances": feature_importances,
         "sample_size_for_tuning": int(tuning_rows),
         "skip_tuning": skip_tuning,
+        "gold_model_path": gold_model_path if write_gold else None,
     }
     save_json(metrics_path, payload)
     return payload
@@ -175,6 +182,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-size", type=int, default=80000, help="Rows to use for hyperparameter tuning.")
     parser.add_argument("--n-iter", type=int, default=6, help="Number of parameter sets to try during tuning.")
     parser.add_argument("--skip-tuning", action="store_true", help="Skip hyperparameter tuning for a fast run.")
+    parser.add_argument(
+        "--gold-model-path",
+        type=str,
+        default=config.GOLD_MODEL_PATH,
+        help="Databricks Datalake (gold) destination for the trained model.",
+    )
+    parser.add_argument(
+        "--no-write-gold", action="store_true", help="Skip writing the trained model to the gold datalake path."
+    )
     return parser.parse_args()
 
 
@@ -187,6 +203,8 @@ def main() -> None:
         sample_size=args.sample_size,
         n_iter=args.n_iter,
         skip_tuning=args.skip_tuning,
+        gold_model_path=args.gold_model_path,
+        write_gold=not args.no_write_gold,
     )
 
 
