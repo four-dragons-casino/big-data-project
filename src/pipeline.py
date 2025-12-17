@@ -4,6 +4,7 @@ import argparse
 from typing import Any, Dict, List
 
 from pyspark.sql import SparkSession
+from pyspark.sql import Window
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
 
@@ -124,7 +125,48 @@ def bronze_to_silver(spark: SparkSession, bronze_table: str, silver_table: str, 
 
 def silver_to_gold(spark: SparkSession, silver_table: str, gold_table: str) -> None:
     df = spark.table(silver_table)
-    df.write.mode("overwrite").format("delta").saveAsTable(gold_table)
+
+    total_rows = df.count()
+
+    brand_base = df.groupBy("brand").agg(
+        F.count("*").alias("listing_count"),
+        F.avg("price_pln").alias("avg_price_pln"),
+        F.expr("percentile_approx(price_pln, 0.5)").alias("median_price_pln"),
+        F.avg("mileage_km").alias("avg_mileage_km"),
+        F.expr("percentile_approx(mileage_km, 0.5)").alias("median_mileage_km"),
+        F.avg("mileage_per_year").alias("avg_mileage_per_year"),
+        F.avg("vehicle_age").alias("avg_vehicle_age"),
+        F.expr("percentile_approx(power_hp, 0.5)").alias("median_power_hp"),
+        F.expr("percentile_approx(displacement_cm3, 0.5)").alias("median_displacement_cm3"),
+        F.avg("feature_count").alias("avg_feature_count"),
+    )
+
+    popular_year = (
+        df.filter(F.col("registration_year").isNotNull())
+        .groupBy("brand", "registration_year")
+        .agg(F.count("*").alias("year_count"))
+        .withColumn(
+            "rn",
+            F.row_number().over(
+                Window.partitionBy("brand").orderBy(F.desc("year_count"), F.desc("registration_year"))
+            ),
+        )
+        .filter(F.col("rn") == 1)
+        .select(
+            "brand",
+            F.col("registration_year").alias("popular_registration_year"),
+            F.col("year_count").alias("popular_registration_year_count"),
+        )
+    )
+
+    brand_gold = brand_base.join(popular_year, on="brand", how="left")
+    brand_gold = brand_gold.withColumn(
+        "brand_share",
+        F.when(F.lit(total_rows) > 0, F.col("listing_count") / F.lit(total_rows)).otherwise(F.lit(0.0)),
+    )
+    brand_gold = brand_gold.withColumn("brand_volume", F.col("listing_count"))
+
+    brand_gold.write.mode("overwrite").format("delta").saveAsTable(gold_table)
 
 
 def run_pipeline(input_csv: str) -> None:
