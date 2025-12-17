@@ -1,4 +1,4 @@
-# Big Data Final Project — Car Price Prediction (Option A)
+# Big Data Final Project — Car Price Prediction
 
 **Project:** End-to-end data pipeline + predictive model for estimating used-car listing prices in PLN.
 
